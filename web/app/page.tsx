@@ -1,5 +1,6 @@
 import { WalletConnect } from "./WalletConnect";
 import { ThemeToggle } from "./ThemeToggle";
+import { ProcurementWorkspace } from "./ProcurementWorkspace";
 
 const navigation = [
   { label: "Overview", href: "#overview", icon: "?" },
@@ -142,15 +143,9 @@ export default function Home() {
                     <h2 className="font-bold">Recent procurement</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Purchase requests and quotation reviews</p>
                   </div>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">No records yet</span>
+
                 </div>
-                <div className="flex min-h-52 flex-col items-center justify-center py-8 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-2xl text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300">?</div>
-                  <h3 className="mt-4 text-sm font-semibold">Your procurement activity will appear here</h3>
-                  <p className="mt-2 max-w-sm text-xs leading-5 text-slate-500 dark:text-slate-400">
-                    Once quotations and purchase requests are added, you can review their status and track each decision.
-                  </p>
-                </div>
+                <ProcurementWorkspace />
               </article>
 
               <article id="approvals" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#101729]">
