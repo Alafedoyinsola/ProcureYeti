@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import {
+  DEFAULT_POLICY,
+  PROCUREMENT_CATEGORIES,
+  evaluateProcurementPolicy,
+} from "./policy-engine";
+import type { ProcurementPolicy, PolicyStatus } from "./policy-engine";
 
 type PurchaseRequest = {
   id: string;
@@ -12,6 +18,8 @@ type PurchaseRequest = {
   deliveryDate: string;
   notes: string;
   createdAt: string;
+  policyStatus?: PolicyStatus;
+  policyReason?: string;
 };
 
 const STORAGE_KEY = "procureyeti-requests";
@@ -20,6 +28,8 @@ export function ProcurementWorkspace() {
   const [requests, setRequests] = useState<PurchaseRequest[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [policyMessage, setPolicyMessage] = useState("");
+  const [policyMessageType, setPolicyMessageType] = useState<"success" | "error">("success");
 
   useEffect(() => {
     try {
@@ -45,19 +55,73 @@ export function ProcurementWorkspace() {
     const form = event.currentTarget;
     const data = new FormData(form);
 
+    let policy: ProcurementPolicy = DEFAULT_POLICY;
+
+    try {
+      const savedPolicy = localStorage.getItem("procureyeti-policy");
+      if (savedPolicy) {
+        const parsed = JSON.parse(savedPolicy) as Partial<ProcurementPolicy>;
+        policy = {
+          NGN: {
+            maxRequestAmount: parsed.NGN?.maxRequestAmount ?? null,
+            approvalThreshold: parsed.NGN?.approvalThreshold ?? null,
+          },
+          USD: {
+            maxRequestAmount: parsed.USD?.maxRequestAmount ?? null,
+            approvalThreshold: parsed.USD?.approvalThreshold ?? null,
+          },
+          allowedCategories: Array.isArray(parsed.allowedCategories)
+            ? parsed.allowedCategories.filter((category) =>
+                PROCUREMENT_CATEGORIES.includes(category)
+              )
+            : [...DEFAULT_POLICY.allowedCategories],
+        };
+      }
+    } catch {
+      setPolicyMessageType("error");
+      setPolicyMessage("Could not read the saved procurement policy. Please check your policy settings and try again.");
+      return;
+    }
+
+    const item = String(data.get("item") || "").trim();
+    const category = String(data.get("category") || "");
+    const budget = Number(data.get("budget"));
+    const currency = String(data.get("currency") || "NGN") as "NGN" | "USD";
+
+    const evaluation = evaluateProcurementPolicy(
+      policy,
+      category,
+      budget,
+      currency
+    );
+
+    if (evaluation.status === "Blocked") {
+      setPolicyMessageType("error");
+      setPolicyMessage(`Request not saved: ${evaluation.reason}`);
+      return;
+    }
+
     const request: PurchaseRequest = {
       id: `${Date.now()}`,
-      item: String(data.get("item") || "").trim(),
-      category: String(data.get("category") || ""),
+      item,
+      category,
       quantity: Number(data.get("quantity")),
-      budget: Number(data.get("budget")),
-      currency: String(data.get("currency") || "NGN"),
+      budget,
+      currency,
       deliveryDate: String(data.get("deliveryDate") || ""),
       notes: String(data.get("notes") || "").trim(),
       createdAt: new Date().toISOString(),
+      policyStatus: evaluation.status,
+      policyReason: evaluation.reason,
     };
 
     setRequests((current) => [request, ...current]);
+    setPolicyMessageType("success");
+    setPolicyMessage(
+      evaluation.status === "Allowed"
+        ? "Request saved. It is within policy and does not require owner approval."
+        : `Request saved and sent for owner approval. ${evaluation.reason}`
+    );
     form.reset();
     setFormOpen(false);
   }
@@ -228,6 +292,16 @@ export function ProcurementWorkspace() {
         </form>
       )}
 
+      {policyMessage && (
+        <p className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+          policyMessageType === "error"
+            ? "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+        }`}>
+          {policyMessage}
+        </p>
+      )}
+
       <div className="mt-5 space-y-3">
         {requests.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-300 px-5 py-8 text-center dark:border-slate-700">
@@ -246,11 +320,15 @@ export function ProcurementWorkspace() {
                 <div>
                   <h4 className="text-sm font-semibold">{request.item}</h4>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {request.category} · Quantity: {request.quantity}
+                    {request.category} Â· Quantity: {request.quantity}
                   </p>
                 </div>
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
-                  Draft
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                  request.policyStatus === "Allowed"
+                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+                    : "bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
+                }`}>
+                  {request.policyStatus ?? "Pending review"}
                 </span>
               </div>
 

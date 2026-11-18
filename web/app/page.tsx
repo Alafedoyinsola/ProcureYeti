@@ -1,6 +1,10 @@
 import { WalletConnect } from "./WalletConnect";
 import { ThemeToggle } from "./ThemeToggle";
 import { ProcurementWorkspace } from "./ProcurementWorkspace";
+import { SupplierWorkspace } from "./SupplierWorkspace";
+import { QuotationWorkspace } from "./QuotationWorkspace";
+import { ApprovalWorkspace } from "./ApprovalWorkspace";
+import { PolicyWorkspace } from "./PolicyWorkspace";
 
 const navigation = [
   { label: "Overview", href: "#overview", icon: "?" },
@@ -8,6 +12,7 @@ const navigation = [
   { label: "Quotations", href: "#quotations", icon: "?" },
   { label: "Suppliers", href: "#suppliers", icon: "?" },
   { label: "Approvals", href: "#approvals", icon: "?" },
+  { label: "Policies", href: "#policies", icon: "?" },
   { label: "Blockchain activity", href: "#activity", icon: "?" },
 ];
 
@@ -151,13 +156,7 @@ export default function Home() {
               <article id="approvals" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#101729]">
                 <h2 className="font-bold">Approval centre</h2>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Owner authorization queue</p>
-                <div className="mt-6 rounded-xl border border-dashed border-slate-300 p-5 text-center dark:border-slate-700">
-                  <span className="text-2xl text-slate-400">?</span>
-                  <p className="mt-3 text-sm font-semibold">All clear</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                    No purchase requests are waiting for approval.
-                  </p>
-                </div>
+                <ApprovalWorkspace />
                 <div className="mt-5 flex items-center justify-between text-xs">
                   <span className="text-slate-500 dark:text-slate-400">Approval authority</span>
                   <span className="font-semibold text-indigo-600 dark:text-indigo-300">Business owner</span>
@@ -172,6 +171,7 @@ export default function Home() {
                   AI will extract prices, quantities, delivery terms and other details to help compare supplier offers.
                 </p>
                 <p className="mt-4 text-xs font-semibold text-indigo-600 dark:text-indigo-300">AI recommendations require human review.</p>
+                <QuotationWorkspace />
               </article>
               <article id="suppliers" className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-[#101729]">
                 <h2 className="font-bold">Supplier management</h2>
@@ -179,7 +179,16 @@ export default function Home() {
                   Keep supplier records, compare offers and apply business purchasing rules before authorizing a purchase.
                 </p>
                 <p className="mt-4 text-xs font-semibold text-indigo-600 dark:text-indigo-300">Supplier eligibility is policy-controlled.</p>
+                <SupplierWorkspace />
               </article>
+            </section>
+
+            <section id="policies" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#101729]">
+              <h2 className="font-bold">Policy &amp; Spending Controls</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                Configure business spending limits, owner approval thresholds and permitted purchasing categories.
+              </p>
+              <PolicyWorkspace />
             </section>
 
             <footer id="activity" className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-5 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
