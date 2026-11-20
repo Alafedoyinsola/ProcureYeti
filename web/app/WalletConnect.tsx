@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { getBtnClass } from "./button-styles";
 
 const ConnectButton = dynamic(
   () =>
@@ -10,7 +11,7 @@ const ConnectButton = dynamic(
   {
     ssr: false,
     loading: () => (
-      <button disabled className="rounded-lg px-4 py-2">
+      <button disabled className={getBtnClass("secondary", "sm", "h-10 px-4 text-xs")}>
         Loading wallet...
       </button>
     ),

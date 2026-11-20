@@ -7,6 +7,7 @@ import {
   evaluateProcurementPolicy,
 } from "./policy-engine";
 import type { ProcurementPolicy, PolicyStatus } from "./policy-engine";
+import { getBtnClass } from "./button-styles";
 
 type PurchaseRequest = {
   id: string;
@@ -14,7 +15,7 @@ type PurchaseRequest = {
   category: string;
   quantity: number;
   budget: number;
-  currency: string;
+  currency: "NGN" | "USD" | "SUI";
   deliveryDate: string;
   notes: string;
   createdAt: string;
@@ -35,6 +36,8 @@ export function ProcurementWorkspace() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
+        // Hydrate purchase requests from client localStorage on initial mount (SSR cannot access localStorage)
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setRequests(JSON.parse(saved) as PurchaseRequest[]);
       }
     } catch {
@@ -85,8 +88,19 @@ export function ProcurementWorkspace() {
 
     const item = String(data.get("item") || "").trim();
     const category = String(data.get("category") || "");
+    const quantity = Number(data.get("quantity"));
     const budget = Number(data.get("budget"));
-    const currency = String(data.get("currency") || "NGN") as "NGN" | "USD";
+    const currency = String(data.get("currency") || "NGN") as "NGN" | "USD" | "SUI";
+
+    if (
+      !Number.isInteger(quantity) ||
+      quantity < 1 ||
+      quantity > 1000000
+    ) {
+      setPolicyMessageType("error");
+      setPolicyMessage("Quantity must be a positive whole number between 1 and 1,000,000.");
+      return;
+    }
 
     const evaluation = evaluateProcurementPolicy(
       policy,
@@ -105,7 +119,7 @@ export function ProcurementWorkspace() {
       id: `${Date.now()}`,
       item,
       category,
-      quantity: Number(data.get("quantity")),
+      quantity,
       budget,
       currency,
       deliveryDate: String(data.get("deliveryDate") || ""),
@@ -142,7 +156,7 @@ export function ProcurementWorkspace() {
         <button
           type="button"
           onClick={() => setFormOpen((open) => !open)}
-          className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+          className={getBtnClass(formOpen ? "secondary" : "primary", "md")}
         >
           {formOpen ? "Close form" : "+ New request"}
         </button>
@@ -243,6 +257,7 @@ export function ProcurementWorkspace() {
               >
                 <option value="NGN">NGN - Nigerian Naira</option>
                 <option value="USD">USD - US Dollar</option>
+                <option value="SUI">SUI - Sui</option>
               </select>
             </div>
           </div>
@@ -278,13 +293,13 @@ export function ProcurementWorkspace() {
             <button
               type="button"
               onClick={() => setFormOpen(false)}
-              className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800"
+              className={getBtnClass("secondary", "md")}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-500"
+              className={getBtnClass("primary", "md")}
             >
               Create request
             </button>
@@ -334,11 +349,15 @@ export function ProcurementWorkspace() {
 
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm">
                 <span className="font-semibold">
-                  {request.currency}{" "}
-                  {request.budget.toLocaleString("en-NG", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {request.currency === "SUI"
+                    ? `${request.budget.toLocaleString("en-NG", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })} SUI`
+                    : `${request.currency} ${request.budget.toLocaleString("en-NG", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`}
                 </span>
                 {request.deliveryDate && (
                   <span className="text-xs text-slate-500 dark:text-slate-400">

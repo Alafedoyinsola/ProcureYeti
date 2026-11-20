@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SunIcon, MoonIcon } from "./icons";
+import { getBtnClass } from "./button-styles";
 
 export function ThemeToggle() {
   const [isDark, setIsDark] = useState(false);
@@ -10,6 +12,8 @@ export function ThemeToggle() {
     const savedTheme = localStorage.getItem("procureyeti-theme");
     const dark = savedTheme === "dark";
 
+    // Hydrate saved theme from client localStorage on initial mount (SSR cannot access localStorage)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsDark(dark);
     document.documentElement.classList.toggle("dark", dark);
     setMounted(true);
@@ -31,11 +35,17 @@ export function ThemeToggle() {
       aria-label={mounted ? `Switch to ${isDark ? "light" : "dark"} mode` : "Loading theme"}
       aria-pressed={mounted && isDark}
       title={mounted ? `Switch to ${isDark ? "light" : "dark"} mode` : "Loading theme"}
-      className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50 disabled:cursor-wait dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+      className={getBtnClass("secondary", "sm", "h-10 px-3")}
     >
-      <span aria-hidden="true" className="text-base">
-        {mounted ? (isDark ? "?" : "?") : "?"}
-      </span>
+      {mounted ? (
+        isDark ? (
+          <SunIcon size={16} className="text-amber-400" />
+        ) : (
+          <MoonIcon size={16} className="text-slate-600" />
+        )
+      ) : (
+        <span className="h-4 w-4 rounded-full bg-slate-300 dark:bg-slate-700 animate-pulse" />
+      )}
       <span className="hidden sm:inline">
         {mounted ? (isDark ? "Light mode" : "Dark mode") : "Theme"}
       </span>

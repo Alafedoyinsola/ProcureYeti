@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { getBtnClass } from "./button-styles";
 
 type PurchaseRequest = {
   id: string;
@@ -24,6 +25,7 @@ type Supplier = {
   category: string;
   status: "Active" | "Inactive";
   createdAt: string;
+  suiAddress?: string;
 };
 
 type Quotation = {
@@ -38,7 +40,91 @@ type Quotation = {
   validUntil: string;
   notes: string;
   createdAt: string;
+  unitPriceDecimal?: string;
+  totalPriceDecimal?: string;
 };
+
+const MIST_PER_SUI = BigInt("1000000000");
+
+function parseSuiToMist(value: string): bigint {
+  const trimmed = value.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+    throw new Error("Amount must be a valid positive number.");
+  }
+  const parts = trimmed.split(".");
+  const intPart = parts[0] || "0";
+  const decPart = parts[1] || "";
+  if (decPart.length > 9) {
+    throw new Error("SUI unit price cannot have more than 9 decimal places.");
+  }
+  const paddedDec = decPart.padEnd(9, "0");
+  const mist = BigInt(intPart) * MIST_PER_SUI + BigInt(paddedDec);
+  if (mist <= BigInt(0)) {
+    throw new Error("SUI unit price must be greater than zero.");
+  }
+  return mist;
+}
+
+function mistToSuiDecimal(mist: bigint): string {
+  const whole = (mist / MIST_PER_SUI).toString();
+  const rem = (mist % MIST_PER_SUI).toString().padStart(9, "0").replace(/0+$/, "");
+  return rem ? `${whole}.${rem}` : whole;
+}
+
+function getSuiSortKey(q: Quotation):
+  | { kind: 0; mist: bigint }
+  | { kind: 1; total: number }
+  | { kind: 2; total: number } {
+  if (typeof q.totalPriceDecimal === "string" && q.totalPriceDecimal.trim() !== "") {
+    try {
+      const mist = parseSuiToMist(q.totalPriceDecimal);
+      return { kind: 0, mist };
+    } catch {
+      return {
+        kind: 2,
+        total: Number.isFinite(q.totalPrice) ? q.totalPrice : Number.MAX_VALUE,
+      };
+    }
+  }
+  return {
+    kind: 1,
+    total: Number.isFinite(q.totalPrice) ? q.totalPrice : Number.MAX_VALUE,
+  };
+}
+
+function compareQuotations(a: Quotation, b: Quotation): number {
+  if (a.currency === "SUI" || b.currency === "SUI") {
+    const keyA = getSuiSortKey(a);
+    const keyB = getSuiSortKey(b);
+
+    if (keyA.kind !== keyB.kind) {
+      return keyA.kind - keyB.kind;
+    }
+
+    if (keyA.kind === 0 && keyB.kind === 0) {
+      if (keyA.mist < keyB.mist) return -1;
+      if (keyA.mist > keyB.mist) return 1;
+      return a.id.localeCompare(b.id);
+    }
+
+    if (keyA.kind === 1 && keyB.kind === 1) {
+      if (keyA.total !== keyB.total) {
+        return keyA.total - keyB.total;
+      }
+      return a.id.localeCompare(b.id);
+    }
+
+    if (keyA.kind === 2 && keyB.kind === 2) {
+      if (keyA.total !== keyB.total) {
+        return keyA.total - keyB.total;
+      }
+      return a.id.localeCompare(b.id);
+    }
+  }
+
+  // Preserve existing NGN/USD sorting behavior
+  return a.totalPrice - b.totalPrice;
+}
 
 const REQUESTS_KEY = "procureyeti-requests";
 const SUPPLIERS_KEY = "procureyeti-suppliers";
@@ -52,6 +138,7 @@ export function QuotationWorkspace() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedRequestId, setSelectedRequestId] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     try {
@@ -60,6 +147,8 @@ export function QuotationWorkspace() {
       const savedQuotations = localStorage.getItem(QUOTATIONS_KEY);
 
       if (savedRequests) {
+        // Hydrate requests from client localStorage on initial mount (SSR cannot access localStorage)
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setRequests(JSON.parse(savedRequests) as PurchaseRequest[]);
       }
 
@@ -93,7 +182,7 @@ export function QuotationWorkspace() {
 
   const requestQuotations = quotations
     .filter((quotation) => quotation.requestId === selectedRequestId)
-    .sort((a, b) => a.totalPrice - b.totalPrice);
+    .sort(compareQuotations);
 
   const inputClass =
     "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
@@ -104,6 +193,7 @@ export function QuotationWorkspace() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError("");
 
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -113,21 +203,78 @@ export function QuotationWorkspace() {
     const request = requests.find((item) => item.id === requestId);
     const supplier = suppliers.find((item) => item.id === supplierId);
 
-    const unitPrice = Number(data.get("unitPrice"));
+    const rawUnitPrice = String(data.get("unitPrice") || "").trim();
     const deliveryDays = Number(data.get("deliveryDays"));
 
     if (!request || !supplier || supplier.status !== "Active") {
-      alert("Select a valid purchase request and active supplier.");
+      setError("Select a valid purchase request and active supplier.");
       return;
     }
 
-    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
-      alert("Enter a valid unit price greater than zero.");
-      return;
+    let unitPrice = 0;
+    let totalPrice = 0;
+    let unitPriceDecimal: string | undefined = undefined;
+    let totalPriceDecimal: string | undefined = undefined;
+
+    if (request.currency === "SUI") {
+      const suiAddr = supplier.suiAddress?.trim() || "";
+      if (!/^0x[0-9a-fA-F]{64}$/.test(suiAddr)) {
+        setError(
+          `Selected supplier "${supplier.name}" does not have a valid Sui wallet address. SUI quotations require a supplier with a configured Sui Testnet address.`
+        );
+        return;
+      }
+
+      if (!/^\d+(\.\d+)?$/.test(rawUnitPrice)) {
+        setError("Enter a valid SUI unit price greater than zero.");
+        return;
+      }
+
+      const [, decPart = ""] = rawUnitPrice.split(".");
+      if (decPart.length > 9) {
+        setError("SUI unit price cannot have more than 9 decimal places.");
+        return;
+      }
+
+      let unitPriceMist: bigint;
+      try {
+        unitPriceMist = parseSuiToMist(rawUnitPrice);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Invalid SUI price.");
+        return;
+      }
+
+      if (
+        !Number.isInteger(request.quantity) ||
+        request.quantity < 1 ||
+        request.quantity > 1000000
+      ) {
+        setError(
+          "The purchase request quantity must be a positive whole number between 1 and 1,000,000."
+        );
+        return;
+      }
+
+      const quantityBigInt = BigInt(request.quantity);
+      const totalPriceMist = unitPriceMist * quantityBigInt;
+
+      unitPriceDecimal = mistToSuiDecimal(unitPriceMist);
+      totalPriceDecimal = mistToSuiDecimal(totalPriceMist);
+
+      unitPrice = Number(rawUnitPrice);
+      totalPrice = unitPrice * request.quantity;
+    } else {
+      const numPrice = Number(rawUnitPrice);
+      if (!Number.isFinite(numPrice) || numPrice <= 0) {
+        setError("Enter a valid unit price greater than zero.");
+        return;
+      }
+      unitPrice = numPrice;
+      totalPrice = unitPrice * request.quantity;
     }
 
     if (!Number.isFinite(deliveryDays) || deliveryDays < 0) {
-      alert("Enter a valid delivery time.");
+      setError("Enter a valid delivery time.");
       return;
     }
 
@@ -139,7 +286,7 @@ export function QuotationWorkspace() {
     );
 
     if (duplicate) {
-      alert("This supplier already has a quotation for this request.");
+      setError("This supplier already has a quotation for this request.");
       return;
     }
 
@@ -147,12 +294,14 @@ export function QuotationWorkspace() {
       requestId,
       supplierId,
       unitPrice,
-      totalPrice: unitPrice * request.quantity,
+      totalPrice,
       currency: request.currency,
       deliveryDays,
       paymentTerms: String(data.get("paymentTerms") || "").trim(),
       validUntil: String(data.get("validUntil") || ""),
       notes: String(data.get("notes") || "").trim(),
+      unitPriceDecimal,
+      totalPriceDecimal,
     };
 
     if (editingId) {
@@ -177,10 +326,12 @@ export function QuotationWorkspace() {
     form.reset();
     setEditingId(null);
     setFormOpen(false);
+    setError("");
   }
 
   function editQuotation(quotation: Quotation) {
     setEditingId(quotation.id);
+    setError("");
     setFormOpen(true);
   }
 
@@ -207,10 +358,33 @@ export function QuotationWorkspace() {
   }
 
   function formatMoney(amount: number, currency: string) {
+    if (currency === "SUI") {
+      return `${amount.toLocaleString("en-NG", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 9,
+      })} SUI`;
+    }
     return `${currency} ${amount.toLocaleString("en-NG", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
+  }
+
+  function formatQuotationPrice(
+    amount: number,
+    currency: string,
+    decimalStr?: string
+  ) {
+    if (currency === "SUI") {
+      if (decimalStr) {
+        return `${decimalStr} SUI`;
+      }
+      return `${amount.toLocaleString("en-NG", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 9,
+      })} SUI`;
+    }
+    return formatMoney(amount, currency);
   }
 
   return (
@@ -228,9 +402,10 @@ export function QuotationWorkspace() {
           disabled={requests.length === 0 || activeSuppliers.length === 0}
           onClick={() => {
             setEditingId(null);
+            setError("");
             setFormOpen((open) => !open);
           }}
-          className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
+          className={getBtnClass(formOpen ? "secondary" : "primary", "md")}
         >
           {formOpen ? "Close form" : "+ Add quotation"}
         </button>
@@ -255,7 +430,7 @@ export function QuotationWorkspace() {
               {editingId ? "Edit quotation" : "Record supplier quotation"}
             </h4>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Enter the details from the supplier's offer.
+              Enter the details from the supplier&apos;s offer.
             </p>
           </div>
 
@@ -275,7 +450,7 @@ export function QuotationWorkspace() {
               {requests.map((request) => (
                 <option key={request.id} value={request.id}>
                   {request.item} | Qty: {request.quantity} | Budget:{" "}
-                  {request.currency} {request.budget.toLocaleString("en-NG")}
+                  {formatMoney(request.budget, request.currency)}
                 </option>
               ))}
             </select>
@@ -309,10 +484,13 @@ export function QuotationWorkspace() {
               id="quote-unit-price"
               name="unitPrice"
               type="number"
-              min="0.01"
-              step="0.01"
+              step="any"
               required
-              defaultValue={editingQuotation?.unitPrice ?? ""}
+              defaultValue={
+                editingQuotation?.unitPriceDecimal ??
+                editingQuotation?.unitPrice ??
+                ""
+              }
               placeholder="Price per unit"
               className={inputClass}
             />
@@ -382,20 +560,30 @@ export function QuotationWorkspace() {
             />
           </div>
 
+          {error && (
+            <p
+              role="alert"
+              className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
+            >
+              {error}
+            </p>
+          )}
+
           <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
             <button
               type="button"
               onClick={() => {
                 setFormOpen(false);
                 setEditingId(null);
+                setError("");
               }}
-              className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800"
+              className={getBtnClass("secondary", "md")}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-500"
+              className={getBtnClass("primary", "md")}
             >
               {editingId ? "Save changes" : "Save quotation"}
             </button>
@@ -450,9 +638,10 @@ export function QuotationWorkspace() {
                   Lowest quotation
                 </p>
                 <p className="mt-1 text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                  {formatMoney(
+                  {formatQuotationPrice(
                     requestQuotations[0].totalPrice,
-                    requestQuotations[0].currency
+                    requestQuotations[0].currency,
+                    requestQuotations[0].totalPriceDecimal
                   )}
                 </p>
               </div>
@@ -518,7 +707,11 @@ export function QuotationWorkspace() {
                     Total quotation
                   </p>
                   <p className="mt-1 text-sm font-bold">
-                    {formatMoney(quotation.totalPrice, quotation.currency)}
+                    {formatQuotationPrice(
+                      quotation.totalPrice,
+                      quotation.currency,
+                      quotation.totalPriceDecimal
+                    )}
                   </p>
                 </div>
                 <div>
@@ -526,7 +719,11 @@ export function QuotationWorkspace() {
                     Unit price
                   </p>
                   <p className="mt-1 text-sm font-semibold">
-                    {formatMoney(quotation.unitPrice, quotation.currency)}
+                    {formatQuotationPrice(
+                      quotation.unitPrice,
+                      quotation.currency,
+                      quotation.unitPriceDecimal
+                    )}
                   </p>
                 </div>
                 <div>
@@ -561,14 +758,14 @@ export function QuotationWorkspace() {
                 <button
                   type="button"
                   onClick={() => editQuotation(quotation)}
-                  className="rounded-lg px-3 py-2 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+                  className={getBtnClass("outline", "xs")}
                 >
                   Edit
                 </button>
                 <button
                   type="button"
                   onClick={() => deleteQuotation(quotation.id)}
-                  className="rounded-lg px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                  className={getBtnClass("destructive", "xs")}
                 >
                   Delete
                 </button>

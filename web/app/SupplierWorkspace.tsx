@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { getBtnClass } from "./button-styles";
 
 type Supplier = {
   id: string;
@@ -12,6 +13,7 @@ type Supplier = {
   category: string;
   status: "Active" | "Inactive";
   createdAt: string;
+  suiAddress?: string;
 };
 
 const STORAGE_KEY = "procureyeti-suppliers";
@@ -22,11 +24,14 @@ export function SupplierWorkspace() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
+        // Hydrate suppliers from client localStorage on initial mount (SSR cannot access localStorage)
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSuppliers(JSON.parse(saved) as Supplier[]);
       }
     } catch {
@@ -43,9 +48,18 @@ export function SupplierWorkspace() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError("");
 
     const form = event.currentTarget;
     const data = new FormData(form);
+
+    const rawSuiAddress = String(data.get("suiAddress") || "").trim();
+    if (rawSuiAddress && !/^0x[0-9a-fA-F]{64}$/.test(rawSuiAddress)) {
+      setError(
+        "Sui wallet address must start with 0x followed by exactly 64 hexadecimal characters."
+      );
+      return;
+    }
 
     const supplierData = {
       name: String(data.get("name") || "").trim(),
@@ -55,6 +69,7 @@ export function SupplierWorkspace() {
       address: String(data.get("address") || "").trim(),
       category: String(data.get("category") || ""),
       status: String(data.get("status") || "Active") as "Active" | "Inactive",
+      suiAddress: rawSuiAddress ? rawSuiAddress.toLowerCase() : undefined,
     };
 
     if (editingId) {
@@ -79,11 +94,13 @@ export function SupplierWorkspace() {
     form.reset();
     setEditingId(null);
     setFormOpen(false);
+    setError("");
   }
 
   function editSupplier(supplier: Supplier) {
     setEditingId(supplier.id);
     setFormOpen(true);
+    setError("");
   }
 
   function deleteSupplier(id: string) {
@@ -100,6 +117,7 @@ export function SupplierWorkspace() {
       supplier.contactPerson,
       supplier.email,
       supplier.category,
+      supplier.suiAddress || "",
     ]
       .join(" ")
       .toLowerCase()
@@ -128,9 +146,10 @@ export function SupplierWorkspace() {
           type="button"
           onClick={() => {
             setEditingId(null);
+            setError("");
             setFormOpen((open) => !open);
           }}
-          className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-500"
+          className={getBtnClass(formOpen ? "secondary" : "primary", "md")}
         >
           {formOpen ? "Close form" : "+ Add supplier"}
         </button>
@@ -147,7 +166,7 @@ export function SupplierWorkspace() {
               {editingId ? "Edit supplier" : "Register a supplier"}
             </h4>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Save the supplier's business and contact details.
+              Save the supplier&apos;s business and contact details.
             </p>
           </div>
 
@@ -253,6 +272,24 @@ export function SupplierWorkspace() {
           </div>
 
           <div>
+            <label htmlFor="supplier-sui-address" className="text-xs font-semibold">
+              Sui Wallet Address
+            </label>
+            <input
+              id="supplier-sui-address"
+              name="suiAddress"
+              type="text"
+              maxLength={66}
+              defaultValue={editingSupplier?.suiAddress ?? ""}
+              placeholder="0x... (64-character hexadecimal address)"
+              className={inputClass}
+            />
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              Supplier&apos;s Sui Testnet payment address for on-chain purchase payments (0x followed by 64 hexadecimal characters).
+            </p>
+          </div>
+
+          <div>
             <label htmlFor="supplier-status" className="text-xs font-semibold">
               Supplier status
             </label>
@@ -267,20 +304,30 @@ export function SupplierWorkspace() {
             </select>
           </div>
 
+          {error && (
+            <p
+              role="alert"
+              className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
+            >
+              {error}
+            </p>
+          )}
+
           <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
             <button
               type="button"
               onClick={() => {
                 setFormOpen(false);
                 setEditingId(null);
+                setError("");
               }}
-              className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800"
+              className={getBtnClass("secondary", "md")}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-500"
+              className={getBtnClass("primary", "md")}
             >
               {editingId ? "Save changes" : "Register supplier"}
             </button>
@@ -345,20 +392,28 @@ export function SupplierWorkspace() {
                 <p>{supplier.email}</p>
                 <p>{supplier.phone}</p>
                 {supplier.address && <p>{supplier.address}</p>}
+                {supplier.suiAddress && (
+                  <p className="break-all font-mono text-slate-700 dark:text-slate-300">
+                    <span className="font-sans font-medium text-slate-500 dark:text-slate-400">
+                      Sui address:{" "}
+                    </span>
+                    {supplier.suiAddress}
+                  </p>
+                )}
               </div>
 
               <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-700">
                 <button
                   type="button"
                   onClick={() => editSupplier(supplier)}
-                  className="rounded-lg px-3 py-2 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+                  className={getBtnClass("outline", "xs")}
                 >
                   Edit
                 </button>
                 <button
                   type="button"
                   onClick={() => deleteSupplier(supplier.id)}
-                  className="rounded-lg px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                  className={getBtnClass("destructive", "xs")}
                 >
                   Delete
                 </button>

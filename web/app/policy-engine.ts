@@ -35,8 +35,16 @@ export function evaluateProcurementPolicy(
   policy: ProcurementPolicy,
   category: string,
   amount: number,
-  currency: "NGN" | "USD"
+  currency: "NGN" | "USD" | "SUI"
 ): PolicyEvaluation {
+  if (currency === "SUI") {
+    return {
+      status: "Requires approval",
+      reason:
+        "SUI purchases require owner approval and on-chain enforcement by the deployed ProcurementPolicy.",
+    };
+  }
+
   if (!policy.allowedCategories.includes(category)) {
     return {
       status: "Blocked",
